@@ -1,0 +1,133 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Ng Siok Yen"
+output: 
+  html_document:
+    keep_md: true
+---
+
+# Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+
+#Loading Libraries
+The necessary libraries are loaded.
+```{r,echo=TRUE}
+library(caret)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+```
+
+
+# Loading Data
+```{r, echo=TRUE, cache=TRUE}
+#Download the data
+if(!file.exists("pml-training.csv")){download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml-training.csv")}
+
+if(!file.exists("pml-testing.csv")){download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml-testing.csv")}
+
+
+#Read the training data and replace empty values by NA
+TrainSet<- read.csv("pml-training.csv", sep=",", header=TRUE, na.strings = c("NA","",'#DIV/0!'))
+TestSet<- read.csv("pml-testing.csv", sep=",", header=TRUE, na.strings = c("NA","",'#DIV/0!'))
+dim(TrainSet)
+dim(TestSet)
+```
+
+# Data Cleaning
+Data cleaning is carried out by removing variables that have a nearly zero variance, variables that are almost always NA and variables that don't make intuitive sense for prediction.
+```{r,echo=TRUE}
+# Remove variables with Nearly Zero Variance
+NZV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZV]
+TestSet  <- TestSet[, -NZV]
+dim(TrainSet)
+dim(TestSet)
+
+# Remove variables that are mostly NA
+AllNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, AllNA==FALSE]
+TestSet  <- TestSet[, AllNA==FALSE]
+dim(TrainSet)
+dim(TestSet)
+
+# Remove identification only variables (columns 1 to 6)
+TrainSet <- TrainSet[, -(1:6)]
+TestSet  <- TestSet[, -(1:6)]
+dim(TrainSet)
+dim(TestSet)
+```
+
+With the cleaning process above, the number of variables for the analysis has been reduced to 53.
+
+# Partition Data for Cross Validation
+cross validation dataset is created to compare the model created by the training subset.
+```{r,echo=TRUE}
+# Create a partition with the training dataset
+set.seed(100)
+inTrain  <- createDataPartition(TrainSet$classe, p=0.7, list=FALSE)
+TrainingSet <- TrainSet[inTrain, ]
+ValidationSet  <- TrainSet[-inTrain, ]
+```
+
+# Prediction Model Building
+Two methods will be applied to model the regressions (in the Train dataset) and the best one (with higher accuracy when applied to the Validation dataset) will be used for the quiz predictions. The methods are: Decision Tree and Random Forests as described below.
+
+### a) Method: Decision Trees
+5-fold cross validation (default setting in trainControl function is 10) is considered when implementing the algorithm to save a little computing time. Since data transformations may be less important in non-linear models like classification trees, we do not transform any variables.
+```{r, echo=TRUE}
+# Model fit
+set.seed(200)
+control <- trainControl(method="cv", number = 5)
+mod_rpart <- train(classe ~ ., data = TrainingSet, method = "rpart", trControl = control)
+mod_rpart$finalModel
+fancyRpartPlot(mod_rpart$finalModel)
+
+# Predict outcomes using validation set
+predict_rpart <- predict(mod_rpart, ValidationSet)
+
+# Show prediction result
+(confmat_rpart <- confusionMatrix(ValidationSet$classe, predict_rpart))
+
+# Accuracy of the model
+(accuracy_rpart <- confmat_rpart$overall[1])
+
+# Out of sample error estimate
+(out_of_sample_error_rpart <- 1 - as.numeric(accuracy_rpart))
+
+```
+
+From the confusion matrix, the accuracy rate is 0.48, and so the out-of-sample error rate is 0.52. Using decision tree does not predict the outcome classe very well.
+
+
+### b) Method: Random Forest
+Since decision tree method does not perform well, we try random forest method instead.
+```{r, echo=TRUE}
+# Model fit
+set.seed(200)
+mod_rf <- train(classe ~ ., data=TrainingSet, method="rf", trControl=control)
+mod_rf
+
+# Predict outcomes using validation set
+predict_rf <- predict(mod_rf, ValidationSet)
+
+# Show prediction result
+(confmat_rf <- confusionMatrix(ValidationSet$classe, predict_rf))
+
+# Accuracy of the model
+(accuracy_rf <- confmat_rf$overall[1])
+
+# Out of sample error estimate
+(out_of_sample_error_rf <- 1 - as.numeric(accuracy_rf))
+```
+
+For this dataset, random forest method is way better than decision tree method. The accuracy rate is 0.9944, and so the out-of-sample error rate is 0.0056. This may be due to the fact that many predictors are highly correlated. Random forests chooses a subset of predictors at each split and decorrelate the trees. This leads to high accuracy, although this algorithm is sometimes difficult to interpret and computationally inefficient.
+
+
+# Prediction on Testing Set
+In this case, random forests is used to predict the outcome variable classe for the testing set.
+```{r, echo=TRUE}
+(predict(mod_rf, TestSet))
+```
